@@ -2,3 +2,4 @@
 
 Members:
 Zach Kuo
+Nikhil Ghind
