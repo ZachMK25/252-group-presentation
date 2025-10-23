@@ -3,3 +3,4 @@
 Members:
 Zach Kuo
 Nikhil Ghind
+Ethan Ho
