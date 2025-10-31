@@ -1,1 +1,32 @@
+# OS-specific
 .DS_Store
+Thumbs.db
+
+# Python build/cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editors/IDE
+.vscode/
+.idea/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# Project-specific checkpoints
+README-checkpoint.md
+crypto-checkpoint.csv
+
+# Logs and local env
+*.log
+.env
+*.env
