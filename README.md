@@ -1,8 +1,10 @@
 # 252 Group Presentation
 
 Members:
+
 - Zach Kuo
 - Nikhil Ghind
+- Ethan Ho
 
 ## Overview
 - Predicts next-bar up/down movement across crypto symbols using an ensemble.
@@ -43,3 +45,4 @@ Notes:
 
 ## Clean-up
 - Historical notebooks were removed to keep the repo tidy. Use `run_ensemble.py` for reproducible runs.
+
