@@ -10,6 +10,7 @@ Members:
 - Predicts next-bar up/down movement across crypto symbols using an ensemble.
 - Trains with 4-fold Purged K-Fold cross-validation and reports model metrics.
 - Uses technical indicators (ROC, EMA, RSI, CCI, Stochastics, Bollinger Bands, volatility, volume features).
+- `roi_per_symbol.csv` contains the output of using our models strategy in a simple trading simulation. The final column in the table has performance averaged across all of the different cryptocurrencies.
 
 ## Files
 - `crypto.csv`: Input OHLCV data in wide format (e.g., `open-BTCUSDT`, `close-ETHUSDT`).
