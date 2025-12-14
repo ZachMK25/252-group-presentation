@@ -17,9 +17,22 @@ from ta.momentum import RSIIndicator, StochasticOscillator, ROCIndicator
 from ta.trend import EMAIndicator, MACD, CCIIndicator
 from ta.volatility import BollingerBands
 from sklearn.isotonic import IsotonicRegression
+import joblib
 import warnings
+import os
+from datetime import datetime
 warnings.filterwarnings('ignore')
 np.random.seed(42)
+
+# ============================================================================
+# CREATE DIRECTORIES FOR SAVING MODELS AND RESULTS
+# ============================================================================
+os.makedirs('saved_models', exist_ok=True)
+os.makedirs('roi_results', exist_ok=True)
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+model_dir = f"saved_models/ensemble_{timestamp}"
+os.makedirs(model_dir, exist_ok=True)
+print(f"\n[INFO] Model directory: {model_dir}\n")
 
 print("Loading crypto.csv and reshaping to long format...")
 raw = pd.read_csv('crypto.csv')
@@ -305,6 +318,10 @@ cv_true_labels = []
 cv_returns = []
 cv_symbols = []
 
+# Storage for trained models per fold
+trained_models_per_fold = {}
+trained_preprocessors = {}
+
 fold_num = 0
 for train_idx, val_idx in pkf.split(X, y):
     fold_num += 1
@@ -312,11 +329,17 @@ for train_idx, val_idx in pkf.split(X, y):
     y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
     X_train_processed = preprocessor.fit_transform(X_train)
     X_val_processed = preprocessor.transform(X_val)
+
+    # Save preprocessor for this fold
+    trained_preprocessors[fold_num] = joblib.dump(preprocessor, f"{model_dir}/preprocessor_fold_{fold_num}.pkl", compress=3)
+
     cv_true_labels.extend(y_val.values)
     # collect returns aligned to validation indices
     returns_aligned = rp.loc[Xy.index]
     cv_returns.extend(returns_aligned.iloc[val_idx].values)
     cv_symbols.extend(Xy.index.get_level_values('symbol').values[val_idx])
+
+    fold_models = {}
     for name, model in base_models.items():
         train_X = X_train_processed
         train_y = y_train.values
@@ -360,8 +383,16 @@ for train_idx, val_idx in pkf.split(X, y):
                 )
             else:
                 raise
+
+        # Save trained model
+        model_path = f"{model_dir}/{name}_fold_{fold_num}.pkl"
+        joblib.dump(model, model_path, compress=3)
+        fold_models[name] = model_path
+
         y_pred_proba = model.predict_proba(X_val_processed)[:, 1]
         cv_predictions[name].extend(y_pred_proba)
+
+    trained_models_per_fold[fold_num] = fold_models
     print(f"Fold {fold_num} done: Train={len(train_idx)}, Val={len(val_idx)}")
 
 cv_predictions = {name: np.array(preds) for name, preds in cv_predictions.items()}
@@ -369,7 +400,7 @@ cv_true_labels = np.array(cv_true_labels)
 cv_returns = np.array(cv_returns)
 cv_symbols = np.array(cv_symbols)
 
-print("Calibrating probabilities (Isotonic)...")
+print("\nCalibrating probabilities (Isotonic)...")
 calibrated_predictions = {}
 calibrators = {}
 for name, preds in cv_predictions.items():
@@ -377,6 +408,9 @@ for name, preds in cv_predictions.items():
     calibrator.fit(preds, cv_true_labels)
     calibrated_predictions[name] = calibrator.predict(preds)
     calibrators[name] = calibrator
+    # Save calibrator
+    calibrator_path = f"{model_dir}/calibrator_{name}.pkl"
+    joblib.dump(calibrator, calibrator_path, compress=3)
 
 print("Computing ensemble weights (Brier and LogLoss)...")
 def calc_weights(calibrated_predictions, cv_true_labels, method='brier'):
@@ -420,6 +454,10 @@ stacked_preds = stacker.predict_proba(Z)[:, 1]
 auc, brier, ll, acc = evaluate(stacked_preds, cv_true_labels)
 rows.append({'model': 'Ensemble_StackedLogReg', 'auc': auc, 'brier': brier, 'logloss': ll, 'accuracy': acc})
 
+# Save stacker
+stacker_path = f"{model_dir}/stacker_ensemble.pkl"
+joblib.dump(stacker, stacker_path, compress=3)
+
 # Evaluate ensembles and include in results
 auc, brier, ll, acc = evaluate(ensemble_brier, cv_true_labels)
 rows.append({'model': 'Ensemble_Brier', 'auc': auc, 'brier': brier, 'logloss': ll, 'accuracy': acc})
@@ -430,13 +468,29 @@ results_df = pd.DataFrame(rows).sort_values('auc', ascending=False)
 print("\nModel Performance Comparison:")
 print(results_df.to_string(index=False, float_format='%.4f'))
 
-# ROI calculation section
-print("\nROI Calculation:")
+# Save model performance results
+results_df.to_csv(f'roi_results/model_performance_{timestamp}.csv', index=False)
+print(f"✓ Model performance saved to: roi_results/model_performance_{timestamp}.csv")
 
-def compute_roi(probs, returns, labels, transaction_cost=0.001, thresholds=None):
+# ============================================================================
+# ENHANCED ROI CALCULATION SECTION
+# ============================================================================
+print("\nEnhanced ROI Calculation:")
+
+def compute_roi_detailed(probs, returns, labels, transaction_cost=0.001, thresholds=None):
+    """
+    Compute ROI with detailed metrics for all thresholds
+
+    Returns:
+        dict: Best result
+        list: All results for each threshold
+    """
     if thresholds is None:
         thresholds = np.arange(0.3, 0.8, 0.01)
+
+    all_results = []
     best = {'threshold': None, 'net_pnl': -np.inf, 'gross_pnl': 0.0, 'accuracy': 0.0, 'n_trades': 0}
+
     for t in thresholds:
         signals = (probs >= t).astype(int)
         position_returns = signals * returns
@@ -447,22 +501,46 @@ def compute_roi(probs, returns, labels, transaction_cost=0.001, thresholds=None)
         net_pnl = gross_pnl - float(np.sum(transaction_costs))
         acc = accuracy_score(labels, signals)
         n_trades = int(np.sum(np.abs(position_changes)))
+
+        result = {
+            'threshold': float(t),
+            'net_pnl': net_pnl,
+            'gross_pnl': gross_pnl,
+            'transaction_costs': float(np.sum(transaction_costs)),
+            'accuracy': float(acc),
+            'n_trades': n_trades
+        }
+        all_results.append(result)
+
         if net_pnl > best['net_pnl']:
-            best = {
-                'threshold': float(t),
-                'net_pnl': net_pnl,
-                'gross_pnl': gross_pnl,
-                'accuracy': float(acc),
-                'n_trades': n_trades
-            }
-    return best
+            best = result.copy()
 
-# Compute ensemble probabilities
-best_brier = compute_roi(ensemble_brier, cv_returns, cv_true_labels)
-best_logloss = compute_roi(ensemble_logloss, cv_returns, cv_true_labels)
+    return best, all_results
 
-print(f"  Brier Ensemble: threshold={best_brier['threshold']:.3f}, net_pnl={best_brier['net_pnl']:+.6f}, gross_pnl={best_brier['gross_pnl']:+.6f}, accuracy={best_brier['accuracy']:.3f}, trades={best_brier['n_trades']}")
-print(f"  LogLoss Ensemble: threshold={best_logloss['threshold']:.3f}, net_pnl={best_logloss['net_pnl']:+.6f}, gross_pnl={best_logloss['gross_pnl']:+.6f}, accuracy={best_logloss['accuracy']:.3f}, trades={best_logloss['n_trades']}")
+# Compute ROI for all ensemble methods
+print("\nOptimizing thresholds for ensemble methods...")
+best_brier, roi_brier_all = compute_roi_detailed(ensemble_brier, cv_returns, cv_true_labels)
+best_logloss, roi_logloss_all = compute_roi_detailed(ensemble_logloss, cv_returns, cv_true_labels)
+best_stacked, roi_stacked_all = compute_roi_detailed(stacked_preds, cv_returns, cv_true_labels)
+
+# Also compute for base models
+base_roi_results = {}
+for name in base_models.keys():
+    best, all_results = compute_roi_detailed(calibrated_predictions[name], cv_returns, cv_true_labels)
+    base_roi_results[name] = {'best': best, 'all_thresholds': all_results}
+
+print(f"  Brier Ensemble: threshold={best_brier['threshold']:.3f}, net_pnl={best_brier['net_pnl']:+.6f}, accuracy={best_brier['accuracy']:.3f}, trades={best_brier['n_trades']}")
+print(f"  LogLoss Ensemble: threshold={best_logloss['threshold']:.3f}, net_pnl={best_logloss['net_pnl']:+.6f}, accuracy={best_logloss['accuracy']:.3f}, trades={best_logloss['n_trades']}")
+print(f"  Stacked Ensemble: threshold={best_stacked['threshold']:.3f}, net_pnl={best_stacked['net_pnl']:+.6f}, accuracy={best_stacked['accuracy']:.3f}, trades={best_stacked['n_trades']}")
+
+# Save detailed ROI results for all thresholds
+roi_brier_df = pd.DataFrame(roi_brier_all)
+roi_logloss_df = pd.DataFrame(roi_logloss_all)
+roi_stacked_df = pd.DataFrame(roi_stacked_all)
+
+roi_brier_df.to_csv(f'roi_results/roi_brier_thresholds_{timestamp}.csv', index=False)
+roi_logloss_df.to_csv(f'roi_results/roi_logloss_thresholds_{timestamp}.csv', index=False)
+roi_stacked_df.to_csv(f'roi_results/roi_stacked_thresholds_{timestamp}.csv', index=False)
 
 # ROI per symbol matrix (net_pnl)
 unique_symbols = sorted(np.unique(cv_symbols))
@@ -473,22 +551,65 @@ for name in row_order:
         preds = calibrated_predictions[name]
     elif name == 'Ensemble_Brier':
         preds = ensemble_brier
-    else:
+    elif name == 'Ensemble_LogLoss':
         preds = ensemble_logloss
+    else:  # Ensemble_StackedLogReg
+        preds = stacked_preds
+
     vals = []
     for sym in unique_symbols:
         mask = (cv_symbols == sym)
         if not np.any(mask):
             vals.append(np.nan)
         else:
-            best = compute_roi(preds[mask], cv_returns[mask], cv_true_labels[mask])
+            best, _ = compute_roi_detailed(preds[mask], cv_returns[mask], cv_true_labels[mask])
             vals.append(float(best['net_pnl']))
     roi_table[name] = vals
+
 roi_df = pd.DataFrame(roi_table, index=unique_symbols).T
 # Average net_pnl across all coins per model
 roi_df['AVG'] = roi_df.mean(axis=1, skipna=True)
 print("\nROI per Symbol (net_pnl) with AVG:")
 print(roi_df.to_string(float_format='%.6f'))
-roi_df.to_csv('roi_per_symbol.csv')
 
-print("\nDone.")
+# Save ROI per symbol
+roi_df.to_csv(f'roi_results/roi_per_symbol_{timestamp}.csv')
+
+# ============================================================================
+# SAVE SUMMARY AND METADATA
+# ============================================================================
+summary_data = {
+    'timestamp': timestamp,
+    'model_directory': model_dir,
+    'data_shape': str(X.shape),
+    'n_features': len(fe.columns),
+    'n_symbols': len(unique_symbols),
+    'symbols': ','.join(unique_symbols),
+    'cv_folds': 4,
+    'embargo_hours': 24,
+    'total_models_trained': len(base_models) * 4 + len(calibrators) + 1,  # base*folds + calibrators + stacker
+    'best_brier_threshold': best_brier['threshold'],
+    'best_brier_net_pnl': best_brier['net_pnl'],
+    'best_logloss_threshold': best_logloss['threshold'],
+    'best_logloss_net_pnl': best_logloss['net_pnl'],
+    'best_stacked_threshold': best_stacked['threshold'],
+    'best_stacked_net_pnl': best_stacked['net_pnl'],
+}
+
+summary_df = pd.DataFrame([summary_data])
+summary_df.to_csv(f'roi_results/summary_{timestamp}.csv', index=False)
+
+print("\n" + "=" * 80)
+print("TRAINING AND EVALUATION COMPLETE")
+print("=" * 80)
+print(f"\n✓ Models saved to: {model_dir}/")
+print(f"✓ ROI results saved to: roi_results/")
+print(f"\nGenerated Files:")
+print(f"  - saved_models/{os.path.basename(model_dir)}/ (trained models)")
+print(f"  - roi_results/model_performance_{timestamp}.csv")
+print(f"  - roi_results/roi_brier_thresholds_{timestamp}.csv")
+print(f"  - roi_results/roi_logloss_thresholds_{timestamp}.csv")
+print(f"  - roi_results/roi_stacked_thresholds_{timestamp}.csv")
+print(f"  - roi_results/roi_per_symbol_{timestamp}.csv")
+print(f"  - roi_results/summary_{timestamp}.csv")
+print("\n")
