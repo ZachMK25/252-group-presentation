@@ -36,16 +36,24 @@ print(f"\n[INFO] Model directory: {model_dir}\n")
 
 print("Loading crypto.csv and reshaping to long format...")
 raw = pd.read_csv('crypto.csv')
-# Detect datetime-like column
-if 'datetime' in raw.columns:
-    dt_col = 'datetime'
-elif 'OpenDt' in raw.columns:
-    dt_col = 'OpenDt'
-else:
-    raise ValueError('crypto.csv must contain either "datetime" or "OpenDt" column')
-raw[dt_col] = pd.to_datetime(raw[dt_col])
+dt_col = 'datetime' if 'datetime' in raw.columns else 'OpenDt'
 
-# Parse wide columns into long format per symbol
+# df_prepared = prepare_crypto_dataframe(raw)
+# dt_col = 'datetime' if 'datetime' in df_prepared.columns else 'OpenDt'
+# symbols = extract_symbols_from_columns(df_prepared, dt_col=dt_col)
+# outliers = detect_outliers_per_symbol(
+#     df_prepared, 
+#     symbols,
+#     detector_params={
+#         'window_length': 14,
+#         'slide_length': 7,
+#         'n_clusters': 9,
+#         'percentile': 85,
+#         'method': 'hierarchical'
+#     }
+# )
+# df = create_clean_dataset(df_prepared, outliers, save_to_csv=True, output_path='crypto_clean.csv')
+
 field_names = {'open','high','low','close','volume'}
 by_symbol = {}
 for col in raw.columns:
