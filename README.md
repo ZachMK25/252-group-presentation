@@ -465,7 +465,7 @@ To modify settings, edit `src/config.py` before running scripts.
 
 ## Contributing
 
-This is an academic project for ECON 252. If you'd like to extend or improve the codebase:
+This is an academic project for CMPE 252. If you'd like to extend or improve the codebase:
 
 1. Fork the repository
 2. Create a feature branch
@@ -477,13 +477,13 @@ This is an academic project for ECON 252. If you'd like to extend or improve the
 
 ## License
 
-This project is for educational purposes as part of ECON 252 coursework.
+This project is for educational purposes as part of CMPE 252 coursework.
 
 ---
 
 ## Acknowledgments
 
-- **Course**: ECON 252 - Financial Markets
+- **Course**: CMPE 252 - Artificial Intelligence and Data Engineering
 - **Technical Analysis Library**: [ta](https://github.com/bukosabino/ta) by bukosabino
 - **Machine Learning**: scikit-learn, XGBoost
 - **Data**: Cryptocurrency OHLCV data
@@ -497,4 +497,4 @@ For questions or issues, please contact the team members:
 - Nikhil Ghind
 - Ethan Ho
 
-**Last Updated**: December 2024
+**Last Updated**: December 2025
