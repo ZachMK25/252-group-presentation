@@ -1,6 +1,6 @@
 # Cryptocurrency Price Prediction using Ensemble Machine Learning
 
-**ECON 252 Group Presentation**
+**CMPE 252 Group Presentation**
 
 **Team Members:**
 - Zach Kuo
